@@ -1,0 +1,175 @@
+local redzlib = loadstring(game:HttpGet("https://raw.githubusercontent.com/minhdepzai-v/LibraryRobloc/refs/heads/main/RedzLibrary.lua"))()
+local TweenService = game:GetService("TweenService")
+
+local Window = redzlib:MakeWindow({
+  Title = "Abyss Stalker V31",
+  SubTitle = "Auto-Update List / Fixed",
+  SaveFolder = "AbyssV31.lua"
+})
+
+local Tab1 = Window:MakeTab({"Main", "cherry"})
+local isActive = false
+local targetPlayer = nil
+local player = game.Players.LocalPlayer
+local isGettingCouch = false
+
+-- 自分が座るのを禁止（全機能停止バグ防止）
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        local char = player.Character
+        local hum = char and char:FindFirstChild("Humanoid")
+        if hum and hum.Sit then
+            hum.Sit = false
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+-- 【新機能】プレイヤーリストを更新する共通関数
+local function updatePlayerList()
+    local names = {}
+    for _, p in pairs(game.Players:GetPlayers()) do
+        if p ~= player then
+            table.insert(names, p.Name)
+        end
+    end
+    -- ドロップダウンのリストを更新
+    -- ※RedzLibの仕様により、Dropdown変数を定義した後に呼び出します
+    if _G.TargetDropdown then
+        _G.TargetDropdown:Set(names)
+    end
+    return names
+end
+
+-- プレイヤーの入退室を監視して自動更新
+game.Players.PlayerAdded:Connect(updatePlayerList)
+game.Players.PlayerRemoving:Connect(updatePlayerList)
+
+-- Couch取得ロジック（即時TP）
+local function checkAndEquipCouch()
+    local char = player.Character
+    local backpack = player:FindFirstChild("Backpack")
+    if not char then return end
+    
+    local couch = char:FindFirstChild("Couch") or backpack:FindFirstChild("Couch")
+    
+    if couch then
+        isGettingCouch = false
+        if couch.Parent == backpack then
+            char.Humanoid:EquipTool(couch)
+        end
+        return true
+    else
+        if not isGettingCouch then
+            isGettingCouch = true
+            task.spawn(function()
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.CFrame = CFrame.new(-82.17, 19.70, -130.69)
+                    while isGettingCouch do
+                        local found = char:FindFirstChild("Couch") or backpack:FindFirstChild("Couch")
+                        if found then isGettingCouch = false break end
+                        if char:FindFirstChild("Humanoid") then char.Humanoid.Jump = true end
+                        task.wait(1)
+                    end
+                end
+            end)
+        end
+        return false
+    end
+end
+
+-- 奈落パージ
+local function ultimatePurge()
+    local char = player.Character
+    if not char then return end
+    for _, v in pairs(char:GetDescendants()) do
+        if v:IsA("Weld") or v:IsA("WeldConstraint") or v:IsA("SeatWeld") then v:Destroy() end
+    end
+    local hum = char:FindFirstChild("Humanoid")
+    if hum then hum:UnequipTools() end
+    for _, v in pairs(char:GetDescendants()) do
+        if v:IsA("Seat") or v:IsA("VehicleSeat") then
+            v.Disabled = true task.wait(0.05) v.Disabled = false
+        end
+    end
+end
+
+-- 奈落実行
+local function safetyAbyss()
+    isActive = false 
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local originalCF = hrp.CFrame
+    local safeY = workspace.FallenPartsDestroyHeight + 50
+    local targetCF = CFrame.new(originalCF.Position.X, safeY, originalCF.Position.Z)
+    
+    local info = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    local tween = TweenService:Create(hrp, info, {CFrame = targetCF})
+    tween:Play()
+    tween.Completed:Wait()
+    
+    hrp.Anchored = true
+    task.wait(0.4)
+    ultimatePurge()
+    task.wait(2.5)
+    
+    hrp.Anchored = false
+    TweenService:Create(hrp, TweenInfo.new(0.5), {CFrame = originalCF}):Play()
+end
+
+-- 追尾ループ
+task.spawn(function()
+    local toggle = true
+    while true do
+        task.wait(0.3)
+        if isActive and targetPlayer and targetPlayer.Character then
+            if checkAndEquipCouch() then
+                local char = player.Character
+                local myHrp = char and char:FindFirstChild("HumanoidRootPart")
+                local tHrp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                
+                if myHrp and tHrp then
+                    local offset = toggle and CFrame.new(0, 0, -3.8) or CFrame.new(0, 0, 3.8)
+                    local followTw = TweenService:Create(myHrp, TweenInfo.new(0.2), {CFrame = tHrp.CFrame * offset})
+                    followTw:Play()
+                    toggle = not toggle
+                    
+                    for _, v in pairs(char:GetDescendants()) do
+                        if (v:IsA("Seat") or v:IsA("VehicleSeat")) and v.Occupant then
+                            if v.Occupant.Parent ~= char then
+                                followTw:Cancel()
+                                safetyAbyss()
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- GUI
+_G.TargetDropdown = Tab1:AddDropdown({
+  Name = "ターゲット選択",
+  Options = updatePlayerList(), -- 初期化時にリストを取得
+  Default = "",
+  Callback = function(Value)
+      targetPlayer = game.Players:FindFirstChild(Value)
+  end
+})
+
+Tab1:AddToggle({
+    Name = "【V31】リスト自動更新・追尾奈落",
+    Default = false,
+    Callback = function(v) 
+        isActive = v 
+        if v then checkAndEquipCouch() end
+    end
+})
+
+Window:SelectTab(Tab1)
